@@ -10,19 +10,24 @@ namespace TelegramBotTask
 {
     internal class BotSettings
     {
-        private int _counter { get; set; } = 1;
+        private int _filesCounter = 1;
 
-        private List<string> _docNames = new List<string>();
-        private List<string> _photoNames = new List<string>();
-        private List<string> _soundNames = new List<string>();
-        private string _checkAllFiles = String.Empty;
-        private int _checkCounter = 1;
+        private int _voiceCounter = 1;
+
+        private int _voiceCheckCounter = 1;
+
+        private int _voiceDownloadCounter = 1;
+
+        private Dictionary<string, Telegram.Bot.Types.File?> _files = new Dictionary<string, Telegram.Bot.Types.File?>();
+        private Dictionary<string, Telegram.Bot.Types.File?> _music = new Dictionary<string, Telegram.Bot.Types.File?>();
+        private Dictionary<string, Telegram.Bot.Types.File?> _voice = new Dictionary<string, Telegram.Bot.Types.File?>();
 
         private TelegramBotClient _botClient = new TelegramBotClient("5456733839:AAGN28AACaqqMvTtNUXKqAMBD-tvZkroCZQ");
 
-        public async Task Initialise()
+        public async Task Initialize()
         {
-            //await _botClient.SetMyCommandsAsync(list);
+            //await _botClient.SetMyCommandsAsync(command);
+           
             using var cts = new CancellationTokenSource();
 
             // StartReceiving does not block the caller thread. Receiving is done on the ThreadPool.
@@ -49,167 +54,236 @@ namespace TelegramBotTask
 
         async Task HandleUpdateAsync(ITelegramBotClient botClient, Update update, CancellationToken cancellationToken)
         {
+            if (update.CallbackQuery != null)
+            {
+                await DownloadFile(botClient, update.CallbackQuery.Data);
+
+                await DownloadMusic(botClient, update.CallbackQuery.Data);
+
+                await DownloadVoice(botClient, update.CallbackQuery.Data);
+            }
+
             if (update.Message is not { } message)
                 return;
 
             var chatId = message.Chat.Id;
 
-            
+            GetDocuments(botClient, chatId, update, cancellationToken, message);
 
+            GetMusic(botClient, chatId, update, cancellationToken, message);
 
-            var Keyboard = new[]
-                {
-                    new[]
-                    {
-                        new KeyboardButton("\U0001F601 Check")
-                    },
+            GetVoice(botClient, chatId, update, cancellationToken, message);
 
-                    new[]
-                    {
-                        new KeyboardButton("\U0001F601 Download")
-                    }
-                };
-
-            var keyBoard = new ReplyKeyboardMarkup(Keyboard);
-           
-
-            //if (message.ReplyToMessage.Type == MessageType.Document)
-            //{
-            //    _ = await botClient.SendTextMessageAsync(
-            //    chatId,
-            //    text: "Yeah, hello you to!? \n",
-            //    replyToMessageId: update.Message.MessageId,
-            //    replyMarkup: keyBoard,
-            //    cancellationToken: cancellationToken
-            //   );
-            //}
-
-            GetDocuments(botClient, chatId, update, cancellationToken, message, _docNames);
-
-            //if (message.Type == MessageType.Voice)
-            //{
-            //    Console.WriteLine(message.Voice.FileId);
-            //    Console.WriteLine(message.Voice.Duration);
-            //    Console.WriteLine(message.Voice.FileSize);
-
-            //    var filename = @$"{message.Voice.Duration}.ogg"; //save voice message
-            //    var file = await botClient.GetFileAsync(message.Voice.FileId);
-            //    FileStream fs = new FileStream(filename, FileMode.Create);
-
-            //    await botClient.DownloadFileAsync(file.FilePath, fs);
-            //    fs.Close();
-            //    fs.Dispose();
-
-            //    Message Voicemessage;
-            //    using (var stream = System.IO.File.OpenRead("13.ogg")) //return voice file.ogg
-            //    {
-            //        message = await botClient.SendAudioAsync(
-            //            chatId: chatId,
-            //            audio: stream,
-            //            cancellationToken: cancellationToken);
-            //    }
-            //}
-
-           
-
-
-            
-
-            if (message.Text == "/check" || message.Text == "\U0001F601 check")
+            if (message.Text == "/check")
             {
-                await commandCheck(botClient, update, chatId, keyBoard, cancellationToken);
+                await commandCheck(botClient, update, chatId, cancellationToken);
             }
 
-           
-
-            //foreach(var e in _docNames)
-            //{
-            //    if (message.Text == e)
-            //    { 
-            //        var file = await botClient.GetFileAsync(message.Text);
-            //            FileStream fs = new FileStream(message.Document.FileName, FileMode.Create);
-            //            await botClient.DownloadFileAsync(file.FilePath, fs);
-            //            fs.Close();
-            //            fs.Dispose();
-            //    }
-            //}
-
-            //if(message.ReplyToMessage.Type == MessageType.)
-            //{
-            //    var file = await botClient.GetFileAsync(message.Document.FileId);
-            //    FileStream fs = new FileStream(message.Document.FileName, FileMode.Create);
-            //    await botClient.DownloadFileAsync(file.FilePath, fs);
-            //    fs.Close();
-            //    fs.Dispose();
-
-            //}
-
-            if (message.Text == "/download" || message.Text == "\U0001F601 download")
+            if (message.Text == "/description")
             {
                 _ = await botClient.SendTextMessageAsync(
                 chatId,
-                text: "What file do you want to download? \n",
+                text: "This bot saves files, photos, music and voice messages \n after sending all necessary files execute /check command to download chosen files!",
                 replyToMessageId: update.Message.MessageId,
-                replyMarkup: keyBoard,
                 cancellationToken: cancellationToken
                );
+            }
 
-                //foreach (var e in _docNames)
-                //{
-                //    if (message.Text == e)
-                //    {
-
-                //    }
-                //}
+            if (message.Type == MessageType.Document)
+            {
+                return;
             }
         }
+       
 
-        private async Task commandCheck(ITelegramBotClient botClient, Update update, long chatId, ReplyKeyboardMarkup keyBoard, CancellationToken cancellationToken)
+        private async Task commandCheck(ITelegramBotClient botClient, Update update, long chatId, CancellationToken cancellationToken)
         {
-            foreach (var e in _docNames)
+            List<List<InlineKeyboardButton>> inlineKeyboardButtons = new List<List<InlineKeyboardButton>>();
+            int i = 0;
+
+            foreach (var fileName in _files.Keys)
             {
-                _checkAllFiles = _checkAllFiles + _checkCounter + ")" + e + "\n";
-                _checkCounter++;
+                inlineKeyboardButtons.Add(new List<InlineKeyboardButton>() { InlineKeyboardButton.WithCallbackData(fileName, fileName) });
             }
+
+            foreach (var musicName in _music.Keys)
+            {
+                inlineKeyboardButtons.Add(new List<InlineKeyboardButton>() { InlineKeyboardButton.WithCallbackData(musicName, musicName) });
+            }
+
+            foreach (var voiceName in _voice.Keys)
+            {
+                inlineKeyboardButtons.Add(new List<InlineKeyboardButton>() { InlineKeyboardButton.WithCallbackData($"Voice message # {_voiceCheckCounter++}", voiceName) });
+            }
+
+            InlineKeyboardMarkup inlineKeyboard = new InlineKeyboardMarkup(inlineKeyboardButtons);
 
             _ = await botClient.SendTextMessageAsync(
                 chatId,
-                text: $"{_checkAllFiles} - all your files!",
+                text: "Download:",
                 replyToMessageId: update.Message.MessageId,
-                replyMarkup: keyBoard,
+                replyMarkup: inlineKeyboard,
                 cancellationToken: cancellationToken
                );
-            _checkAllFiles = String.Empty;
-            _checkCounter = 1;
+
+            _voiceCheckCounter = 1;
+            _voiceDownloadCounter = 1;
         }
 
-        async void GetDocuments(ITelegramBotClient botClient, long chatId, Update update, CancellationToken cancellationToken, Message message, List<string> doc_name)
+
+        async void GetDocuments(ITelegramBotClient botClient, long chatId, Update update, CancellationToken cancellationToken, Message message)
         {
-            if (message.Type == MessageType.Document)
+            if (message.Type != MessageType.Document)
             {
+                return;
+            }
 
-               
-
-
-                //Console.WriteLine(message.Document.FileId);
-                //Console.WriteLine($"{message.Document.FileName} has been received successfuly!");
-                doc_name.Add(message.Document.FileName);
-
-                _ = await botClient.SendTextMessageAsync(
+            foreach(var fileName in _files.Keys)
+            {
+                if (_files.ContainsKey(message.Document.FileName))
+                {
+                    _ = await botClient.SendTextMessageAsync(
                     chatId,
-                    text: $"{_counter++}) {message.Document.FileName} has been successfuly received!",
+                    text: $"{message.Document.FileName} already exists!",
                     replyToMessageId: update.Message.MessageId,
                     cancellationToken: cancellationToken);
 
+                    return;
+                }
+            }
+            
+            _files.Add(message.Document.FileName, await botClient.GetFileAsync(message.Document.FileId));
 
+            
+            _ = await botClient.SendTextMessageAsync(
+                chatId,
+                text: $"{_filesCounter++}) {message.Document.FileName} has been successfuly received!",
+                replyToMessageId: update.Message.MessageId,
+                cancellationToken: cancellationToken);
+        }
+
+
+        async void GetMusic(ITelegramBotClient botClient, long chatId, Update update, CancellationToken cancellationToken, Message message)
+        {
+            
+            if (message.Type != MessageType.Audio)
+            {
+                return;
             }
 
-            //var file = await botClient.GetFileAsync(message.Document.FileId);
-            //FileStream fs = new FileStream("_" + message.Document.FileName + "has been downloaded successfuly", FileMode.Create);
-            //await botClient.DownloadFileAsync(file.FilePath, fs);
-            //fs.Close();
-            //fs.Dispose();
+            foreach (var musicName in _music.Keys)
+            {
+                if (_music.ContainsKey(message.Audio.FileName))
+                {
+                    _ = await botClient.SendTextMessageAsync(
+                    chatId,
+                    text: $"{message.Audio.FileName} already exists!",
+                    replyToMessageId: update.Message.MessageId,
+                    cancellationToken: cancellationToken);
+
+                    return;
+                }
+            }
+
+                _music.Add(message.Audio.FileName, await botClient.GetFileAsync(message.Audio.FileId));
+
+
+                _ = await botClient.SendTextMessageAsync(
+                    chatId,
+                    text: $"{_filesCounter++}) {message.Audio.FileName} has been successfuly received!",
+                    replyToMessageId: update.Message.MessageId,
+                    cancellationToken: cancellationToken);
+            
         }
+
+
+        async void GetVoice(ITelegramBotClient botClient, long chatId, Update update, CancellationToken cancellationToken, Message message)
+        {
+            if (message.Type != MessageType.Voice)
+            {
+                return;
+            }
+
+            int counter_voices = 0;
+            foreach (var voiceName in _voice.Keys)
+            {
+                if (_voice.ContainsKey(message.Voice.FileUniqueId))
+                {
+                    _ = await botClient.SendTextMessageAsync(
+                    chatId,
+                    text: $"This voice message already exists!",
+                    replyToMessageId: update.Message.MessageId,
+                    cancellationToken: cancellationToken);
+
+                    return;
+                }
+            }
+
+            _voice.Add(message.Voice.FileUniqueId, await botClient.GetFileAsync(message.Voice.FileId));
+
+            _ = await botClient.SendTextMessageAsync(
+                chatId,
+                text: $"Voice message # {_voiceCounter++} has been successfuly received!",
+                replyToMessageId: update.Message.MessageId,
+                cancellationToken: cancellationToken);
+
+            
+        }
+
+
+        private async Task DownloadFile(ITelegramBotClient botClient, string fileName)
+        {
+            foreach (var file in _files)
+            {
+                if (fileName != file.Key)
+                {
+                    continue;
+                }
+
+                using (FileStream Fs = new FileStream($"{file.Key}", FileMode.Create))
+                {
+                    await botClient.DownloadFileAsync(file.Value.FilePath, Fs);
+                    Fs.Close();
+                }
+            }
+        }
+
+
+        private async Task DownloadMusic(ITelegramBotClient botClient, string musicName)
+        {
+            foreach (var soundtrack in _music)
+            {
+                if (musicName != soundtrack.Key)
+                {
+                    continue;
+                }
+
+                using (FileStream Fs = new FileStream($"{soundtrack.Key}", FileMode.Create))
+                {
+                    await botClient.DownloadFileAsync(soundtrack.Value.FilePath, Fs);
+                    Fs.Close();
+                }
+            }
+        }
+
+
+        private async Task DownloadVoice(ITelegramBotClient botClient, string voiceMessageName)
+        {
+            foreach (var voiceMessage in _voice)
+            {
+                if (voiceMessageName != voiceMessage.Key)
+                {
+                    continue;
+                }
+
+                using (FileStream Fs = new FileStream($"Voice message # {_voiceDownloadCounter++}.ogg", FileMode.Create))
+                {
+                    await botClient.DownloadFileAsync(voiceMessage.Value.FilePath, Fs);
+                    Fs.Close();
+                }
+            }
+        }
+
 
         Task HandlePollingErrorAsync(ITelegramBotClient botClient, Exception exception, CancellationToken cancellationToken)
         {
